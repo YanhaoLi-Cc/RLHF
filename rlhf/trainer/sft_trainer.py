@@ -111,7 +111,25 @@ class SFTTrainer(ABC):
         
         # 配置日志工具
         if self.strategy.args.use_wandb and self.strategy.is_rank_0():
-            print("wandb not implement")
+            # print("wandb not implement")
+            import wandb
+
+            self._wandb = wandb
+            if not wandb.api.api_key:
+                wandb.login(key=strategy.args.use_wandb)
+            wandb.init(
+                entity=strategy.args.wandb_org,
+                project=strategy.args.wandb_project,
+                group=strategy.args.wandb_group,
+                name=strategy.args.wandb_run_name,
+                config=strategy.args.__dict__,
+                reinit=True,
+            )
+
+            wandb.define_metric("train/global_step")
+            wandb.define_metric("train/*", step_metric="train/global_step", step_sync=True)
+            wandb.define_metric("eval/global_step")
+            wandb.define_metric("eval/*", step_metric="eval/global_step", step_sync=True)
         
         if self.strategy.args.use_tensorboard:
             print("tensorboard not implement")
@@ -200,7 +218,12 @@ class SFTTrainer(ABC):
                 
                 # 处理非预训练模式
                 if not self.pretrain_mode:
-                    if not self.packing_samples:
+                    if self.packing_samples:
+                        index = 0
+                        for input_length, source_len in zip(infos["input_length"], prompt_id_lens):
+                            labels[0][index : index + source_len] = self.loss_fn.IGNORE_INDEX
+                            index += input_length
+                    else:
                         for label, source_len in zip(labels, prompt_id_lens):
                             label[:source_len] = self.loss_fn.IGNORE_INDEX
                 
@@ -294,4 +317,68 @@ class SFTTrainer(ABC):
                 client_states
             )
     
-    
+    def evaluate(self, eval_dataloader, steps=0):
+        times = 0
+        self.model.eval()
+        with torch.no_grad():
+            loss_sum = 0
+            step_bar = tqdm(
+                range(eval_dataloader.__len__()),
+                desc="Eval stage of steps %d" % steps,
+                disable=not self.strategy.is_rank_0(),
+            )
+
+            for prompt_id_lens, inputs, attention_masks, infos in eval_dataloader:
+                if self.packing_samples:
+                    inputs = inputs.to(torch.cuda.current_device())
+                    attention_mask = attention_masks.to(torch.cuda.current_device())
+                else:
+                    inputs = inputs.to(torch.cuda.current_device()).squeeze(1)
+                    attention_mask = attention_masks.to(torch.cuda.current_device()).squeeze(1)
+
+                if self.strategy.ring_attn_group is None:
+                    output = self.model(inputs, attention_mask=attention_mask, return_output=True)
+                else:
+                    output = self.model(
+                        inputs, 
+                        attention_mask=attention_mask, 
+                        return_output=True,
+                        ring_attn_group=self.strategy.ring_attn_group,
+                        packed_seq_lens=infos["input_length"],
+                    )
+                    
+                # loss function
+                labels = torch.where(
+                    attention_mask.bool(),
+                    inputs,
+                    self.loss_fn.IGNORE_INDEX,
+                )
+
+                if not self.pretrain_mode:
+                    if self.packing_samples:
+                        index = 0
+                        for input_length, source_len in zip(infos["input_length"], prompt_id_lens):
+                            labels[0][index : index + source_len] = self.loss_fn.IGNORE_INDEX
+                            index += input_length
+                    else:
+                        for label, source_len in zip(labels, prompt_id_lens):
+                            label[:source_len] = self.loss_fn.IGNORE_INDEX
+
+                loss = self.loss_fn(output.logits, labels)
+
+                times += 1
+                loss_sum += loss.item()
+                bar_dict = {"eval gpt_loss": loss_sum / times}
+                step_bar.update()
+                logs = self.strategy.all_reduce(bar_dict)
+                step_bar.set_postfix(logs)
+
+            if self.strategy.is_rank_0():
+                if self._wandb is not None:
+                    logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": steps}.items()}
+                    self._wandb.log(logs)
+                elif self._tensorboard is not None:
+                    for k, v in logs.items():
+                        self._tensorboard.add_scalar(f"eval/{k}", v, steps)
+        self.model.train()  # reset model state
+        
