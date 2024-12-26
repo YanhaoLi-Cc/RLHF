@@ -24,7 +24,7 @@ def get_tokenizer(pretrain, model, padding_side="left", strategy=None, use_fast=
 
 
 def get_strategy(args):
-    from openrlhf.utils.deepspeed import DeepspeedStrategy
+    from rlhf.utils.deepspeed import DeepspeedStrategy
 
     strategy = DeepspeedStrategy(
         seed=getattr(args, "seed", 42),

@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List, Dict, Any
 
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from transformers.integrations.deepspeed import HfDeepSpeedConfig

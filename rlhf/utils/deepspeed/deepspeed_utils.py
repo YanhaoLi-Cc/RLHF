@@ -4,7 +4,8 @@
 # DeepSpeed Team
 
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-
+from typing import Optional, Tuple, Union, List, Dict, Any
+import torch
 
 def get_train_ds_config(
     offload: bool,

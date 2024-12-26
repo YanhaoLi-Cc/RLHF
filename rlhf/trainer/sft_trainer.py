@@ -6,7 +6,16 @@ import torch
 import torch.distributed as dist
 from torch.nn import functional as F
 from torch.optim import Optimizer
-from ..models import GPTLMLoss
+from rlhf.models import GPTLMLoss
+from rlhf.utils.distributed_sampler import DistributedSampler
+
+from torch.utils.data import DataLoader
+
+from typing import Optional, Tuple, Union, List, Dict, Any
+from argparse import Namespace
+
+from flash_attn.utils.distributed import all_gather
+
 
 class SFTTrainer(ABC):
     """监督微调(Supervised Fine-Tuning)训练器的基类。
@@ -50,15 +59,15 @@ class SFTTrainer(ABC):
     def __init__(
         self,
         model: torch.nn.Module,
-        strategy: Strategy,
+        strategy,
         optim: Optimizer,
         train_dataloader: DataLoader,
         eval_dataloader: DataLoader, 
-        scheduler: Scheduler,
+        scheduler,
         max_norm: float = 1.0,
         batch_size: int = 1,
         max_epochs: int = 2,
-        tokenizer: Optional[Tokenizer] = None,
+        tokenizer = None,
         pretrain_mode: bool = False,
     ) -> None:
         """初始化SFT训练器。
@@ -100,7 +109,7 @@ class SFTTrainer(ABC):
         self.loss_fn = GPTLMLoss(
             ring_attn_group=self.strategy.ring_attn_group
         )
-        self.aux_loss = self.aux_loss_coef > 1e-8
+        self.aux_loss = self.args.aux_loss_coef > 1e-8
         
         # 训练优化配置
         self.packing_samples = strategy.args.packing_samples
@@ -150,7 +159,7 @@ class SFTTrainer(ABC):
             args.save_steps = float("inf") # 不保存检查点
             
         # 计算初始步数和轮数
-        step = consumed_samples // args.train_batch_size * step.strategy.accumulated_gradient + 1
+        step = consumed_samples // args.train_batch_size * self.strategy.accumulated_gradient + 1
         start_epoch = consumed_samples // args.train_batch_size // num_update_steps_per_epoch
         consumed_samples = consumed_samples % (num_update_steps_per_epoch * args.train_batch_size)
 
@@ -229,7 +238,7 @@ class SFTTrainer(ABC):
                 
                 # 计算损失并更新
                 gpt_loss = self.loss_fn(output.logits, labels)
-                loss = gpt_loss + aux_loss * self.aux_loss_coef
+                loss = gpt_loss + aux_loss * self.args.aux_loss_coef
                 self.strategy.backward(loss, self.model, self.optimizer)
                 self.strategy.optimizer_step(self.optimizer, self.model, self.scheduler)
                 
@@ -306,7 +315,7 @@ class SFTTrainer(ABC):
                 self.evaluate(self.eval_dataloader, global_step)
         
         # 保存模型检查点
-        if global_step % args.save_ckpt == 0:
+        if global_step % args.save_steps == 0:
             tag = f"global_step{global_step}"
             self.strategy.save_ckpt(
                 self.model.model,

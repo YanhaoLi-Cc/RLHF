@@ -1,6 +1,9 @@
 import logging
 import sys
 
+from typing import Optional, Tuple, Union, List, Dict, Any
+
+
 # 定义日志格式常量
 _FORMAT: str = "%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
 """
@@ -26,13 +29,13 @@ class NewLineFormatter(logging.Formatter):
 
     Attributes:
         fmt (str): 日志格式字符串
-        datafmt (str): 日期时间格式字符串
+        datefmt (str): 日期时间格式字符串
 
     Example:
         >>> # 创建formatter实例
         >>> formatter = NewLineFormatter(
         ...     fmt=_FORMAT,
-        ...     datafmt=_DATE_FORMAT
+        ...     datefmt=_DATE_FORMAT
         ... )
         >>> 
         >>> # 配置logger
@@ -48,20 +51,20 @@ class NewLineFormatter(logging.Formatter):
         INFO 12-23 14:30:45 test.py:10] Line 3
     """
 
-    def __init__(self, fmt: str, datafmt: Optional[str] = None):
+    def __init__(self, fmt: str, datefmt: Optional[str] = None):
         """
         初始化格式化器。
 
         Args:
             fmt: 日志格式字符串
-            datafmt: 日期时间格式字符串，可选
+            datefmt: 日期时间格式字符串，可选
 
         Note:
             - 继承基类初始化
             - 支持自定义日期格式
             - 保持与标准Formatter兼容
         """
-        super().__init__(fmt, datafmt)
+        super().__init__(fmt, datefmt)
 
     def format(self, record: logging.LogRecord) -> str:
         """

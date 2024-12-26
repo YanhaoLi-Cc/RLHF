@@ -3,11 +3,12 @@ import argparse
 import math
 import os 
 from datetime import datetime
+from argparse import Namespace
 
 from transformers.trainer import get_scheduler
 
 from rlhf.models import Actor
-from rlhf.trainer import sft_trainer
+from rlhf.trainer import SFTTrainer
 from rlhf.datasets import SFTDataset
 from rlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
@@ -211,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument("--grad_accum_dtype", type=str, default=None, help="Adam grad accum data type")
     parser.add_argument("--disable_trace_cache", action="store_true", default=False)
     parser.add_argument("--gradient_checkpointing_use_reentrant", action="store_true", default=False)
-    parser.add_argument("--disable_fast_tokenizer", action="store_true", default=False)
+    parser.add_argument("--disable_fast_tokenizer", action="store_true", default=True)
 
     # SFT
     parser.add_argument("--max_epochs", type=int, default=2)
@@ -265,7 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_wandb", type=str, default=None)
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
-    parser.add_argument("--wandb_project", type=str, default="openrlhf_train_sft")
+    parser.add_argument("--wandb_project", type=str, default="rlhf")
     parser.add_argument(
         "--wandb_run_name",
         type=str,

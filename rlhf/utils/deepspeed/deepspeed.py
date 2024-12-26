@@ -6,7 +6,7 @@ from abc import ABC
 from typing import List, Tuple, Union
 from datetime import timedelta
 from collections import defaultdict
-
+from typing import Optional, Tuple, Union, List, Dict, Any, Callable
 import deepspeed
 import torch
 import torch.nn as nn
@@ -16,8 +16,10 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import _LRScheduler
 from peft import PeftModel, get_peft_model_state_dict
+from torch.utils.data.dataset import Dataset 
+from torch.utils.data.sampler import Sampler
 
-from deepspeed.ops.adam import deepspeedCPUAdam, FusedAdam
+from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 
 from rlhf.utils.distributed_sampler import DistributedSampler
 from rlhf.models import Actor
@@ -68,49 +70,49 @@ class DeepspeedStrategy(ABC):
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    
-def setup_distributed(self, timeout: timedelta = timedelta(minutes=30)) -> None:
-    """设置分布式训练环境。
-    
-    此函数负责初始化分布式训练所需的各项配置,包括设置随机种子、GPU设备、分布式后端和梯度累积等。
-    
-    Args:
-        timeout (timedelta, optional): 分布式初始化的超时时间。默认为30分钟。
         
-    Notes:
-        - 函数会根据环境变量LOCAL_RANK设置local_rank参数
-        - 如果指定了local_rank,会将当前进程绑定到对应的GPU设备
-        - 使用deepspeed初始化分布式后端
-        - 设置环形注意力机制(ring attention)
-        - 计算梯度累积步数
-    """
-    # 设置随机种子以确保可重现性
-    self.set_seed(self.seed)
-    
-    # 从环境变量获取local_rank
-    if self.args.local_rank == -1 and "LOCAL_RANK" in os.environ:
-        self.args.local_rank = int(os.environ["LOCAL_RANK"])
-    
-    # 如果指定了local_rank,将进程绑定到对应GPU
-    if self.args.local_rank != -1:
-        torch.cuda.set_device(self.args.local_rank)
-    
-    # 初始化分布式训练后端
-    deepspeed.init_distributed(timeout=timeout)
-    
-    # 设置环形注意力机制
-    self.setup_ring_attn()
-    
-    # 获取总进程数
-    self.world_size = dist.get_world_size()
-    
-    # 计算梯度累积步数
-    # accumulated_gradient = (总批次大小 * 环形注意力大小) / (微批次大小 * 总进程数)
-    self.accumulated_gradient = (
-        self.train_batch_size * self.ring_attn_size // 
-        self.micro_train_batch_size // self.world_size
-    )
-    
+    def setup_distributed(self, timeout: timedelta = timedelta(minutes=30)) -> None:
+        """设置分布式训练环境。
+        
+        此函数负责初始化分布式训练所需的各项配置,包括设置随机种子、GPU设备、分布式后端和梯度累积等。
+        
+        Args:
+            timeout (timedelta, optional): 分布式初始化的超时时间。默认为30分钟。
+            
+        Notes:
+            - 函数会根据环境变量LOCAL_RANK设置local_rank参数
+            - 如果指定了local_rank,会将当前进程绑定到对应的GPU设备
+            - 使用deepspeed初始化分布式后端
+            - 设置环形注意力机制(ring attention)
+            - 计算梯度累积步数
+        """
+        # 设置随机种子以确保可重现性
+        self.set_seed(self.seed)
+        
+        # 从环境变量获取local_rank
+        if self.args.local_rank == -1 and "LOCAL_RANK" in os.environ:
+            self.args.local_rank = int(os.environ["LOCAL_RANK"])
+        
+        # 如果指定了local_rank,将进程绑定到对应GPU
+        if self.args.local_rank != -1:
+            torch.cuda.set_device(self.args.local_rank)
+        
+        # 初始化分布式训练后端
+        deepspeed.init_distributed(timeout=timeout)
+        
+        # 设置环形注意力机制
+        self.setup_ring_attn()
+        
+        # 获取总进程数
+        self.world_size = dist.get_world_size()
+        
+        # 计算梯度累积步数
+        # accumulated_gradient = (总批次大小 * 环形注意力大小) / (微批次大小 * 总进程数)
+        self.accumulated_gradient = (
+            self.train_batch_size * self.ring_attn_size // 
+            self.micro_train_batch_size // self.world_size
+        )
+        
     def setup_ring_attn(self) -> None:
         """设置环形注意力机制(Ring Attention)。
         
@@ -201,7 +203,7 @@ def setup_distributed(self, timeout: timedelta = timedelta(minutes=30)) -> None:
             model = model.model
             
         # 根据是否进行CPU卸载选择优化器类型
-        AdamOptimizer = deepspeedCPUAdam if self.adam_offload else FusedAdam
+        AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
         
         # 获取分组后的模型参数
         optim_params = get_optimizer_grouped_parameters(model, kwargs["weight_decay"])
@@ -342,7 +344,7 @@ def setup_distributed(self, timeout: timedelta = timedelta(minutes=30)) -> None:
             pin_memory=pin_memory,
         )
     
-    def _unwrap_model(self, model: Union[nn.Module, Actor, DistributedDataParallel]) -> nn.Module:
+    def _unwrap_model(self, model: Union[nn.Module, Actor, torch.nn.parallel.DistributedDataParallel]) -> nn.Module:
         """解包装模型,获取原始的模型实例。
         
         递归地解除模型的各层封装,返回最内层的实际模型实例。
@@ -423,7 +425,7 @@ def setup_distributed(self, timeout: timedelta = timedelta(minutes=30)) -> None:
                 else:  # 如果模型为空,添加空三元组
                     ret.append((None, None, None))
             else:  # 如果是单个模型对象
-                ret.append(self._ds_init_train_model(arg))
+                ret.append(self._ds_init_eval_model(arg))
         
         # 如果只有一个结果返回单个结果,否则返回列表
         return ret[0] if len(ret) == 1 else ret
@@ -463,6 +465,8 @@ def setup_distributed(self, timeout: timedelta = timedelta(minutes=30)) -> None:
         # DeepSpeed初始化
         engine, optim, _, scheduler = deepspeed.initialize(
             model=model.model if is_actor else model,
+            optimizer=optim,
+            lr_scheduler=scheduler,
             args={"local_rank": self.args.local_rank},
             config=ds_config,
             dist_init_required=True
@@ -625,61 +629,61 @@ def setup_distributed(self, timeout: timedelta = timedelta(minutes=30)) -> None:
                             ):
                                 data = param.data.to(device)
                                 param_ema.data.copy_((1 - beta) * data + beta * param_ema.data)
-    
-def load_model(
-    self,
-    model: nn.Module,
-    path: str,
-    map_location: Union[str, torch.device] = "cpu",
-    strict: bool = False,
-    key_replace_fn: Optional[Callable[[Dict[str, torch.Tensor]], Dict[str, torch.Tensor]]] = None
-) -> None:
-    """
-    加载模型参数状态。
+        
+    def load_model(
+        self,
+        model: nn.Module,
+        path: str,
+        map_location: Union[str, torch.device] = "cpu",
+        strict: bool = False,
+        key_replace_fn: Optional[Callable[[Dict[str, torch.Tensor]], Dict[str, torch.Tensor]]] = None
+    ) -> None:
+        """
+        加载模型参数状态。
 
-    从指定路径加载模型状态字典并应用到模型。支持模型参数键的自定义替换,
-    可以处理分布式封装的模型。
+        从指定路径加载模型状态字典并应用到模型。支持模型参数键的自定义替换,
+        可以处理分布式封装的模型。
 
-    Args:
-        model: 待加载参数的PyTorch模型
-        path: 模型状态字典的存储路径
-        map_location: 参数加载的目标设备,可以是字符串或torch.device对象,默认"cpu"
-        strict: 是否严格匹配键值,为True时键不匹配会报错,默认False
-        key_replace_fn: 可选的状态字典键替换函数,用于修改加载的键名,默认None
+        Args:
+            model: 待加载参数的PyTorch模型
+            path: 模型状态字典的存储路径
+            map_location: 参数加载的目标设备,可以是字符串或torch.device对象,默认"cpu"
+            strict: 是否严格匹配键值,为True时键不匹配会报错,默认False
+            key_replace_fn: 可选的状态字典键替换函数,用于修改加载的键名,默认None
 
-    Note:
-        - 会自动处理DistributedDataParallel等封装的模型
-        - 支持通过key_replace_fn修改状态字典的键名
-        - 非严格模式下允许键不完全匹配
-        - 使用torch.load加载状态字典
+        Note:
+            - 会自动处理DistributedDataParallel等封装的模型
+            - 支持通过key_replace_fn修改状态字典的键名
+            - 非严格模式下允许键不完全匹配
+            - 使用torch.load加载状态字典
 
-    Examples:
-        >>> model = MyModel()
-        >>> loader = ModelLoader()
-        >>> # 基本加载
-        >>> loader.load_model(model, "model.pth")
-        >>> # 使用键替换函数
-        >>> loader.load_model(model, "model.pth", 
-        ...                  key_replace_fn=lambda d: {k.replace('module.',''): v 
-        ...                                           for k,v in d.items()})
-    """
-    # 获取原始模型(移除分布式封装等)
-    unwrapped_model = self._unwrap_model(model)
+        Examples:
+            >>> model = MyModel()
+            >>> loader = ModelLoader()
+            >>> # 基本加载
+            >>> loader.load_model(model, "model.pth")
+            >>> # 使用键替换函数
+            >>> loader.load_model(model, "model.pth", 
+            ...                  key_replace_fn=lambda d: {k.replace('module.',''): v 
+            ...                                           for k,v in d.items()})
+        """
+        # 获取原始模型(移除分布式封装等)
+        unwrapped_model = self._unwrap_model(model)
 
-    # 加载状态字典
-    state_dict = torch.load(path, map_location=map_location)
+        # 加载状态字典
+        state_dict = torch.load(path, map_location=map_location)
 
-    # 如果提供了键替换函数,执行键替换
-    if key_replace_fn:
-        state_dict = key_replace_fn(state_dict)
+        # 如果提供了键替换函数,执行键替换
+        if key_replace_fn:
+            state_dict = key_replace_fn(state_dict)
 
-    # 将状态字典加载到模型
-    unwrapped_model.load_state_dict(state_dict, strict=strict)
-    
+        # 将状态字典加载到模型
+        unwrapped_model.load_state_dict(state_dict, strict=strict)
+        
     def save_model(
         self,
         model: nn.Module,
-        tokenizer: PreTrainedTokenizer,
+        tokenizer,
         output_dir: str,
         **kwargs
     ) -> None:

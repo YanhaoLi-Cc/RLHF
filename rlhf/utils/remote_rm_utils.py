@@ -3,6 +3,8 @@ import ray
 import requests
 import torch
 
+from typing import Optional, Tuple, Union, List, Dict, Any
+
 from rlhf.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)

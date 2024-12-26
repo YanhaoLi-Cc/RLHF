@@ -2,6 +2,9 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 
+from typing import Optional, Tuple, Union, List, Dict, Any
+
+
 # 初始化全局变量
 RING_ATTN_GROUP: Optional[dist.ProcessGroup] = None
 """

@@ -6,6 +6,9 @@ from torch.utils.data import Dataset
 
 from .utils import zero_pad_sequences
 
+from typing import Optional, Tuple, Union, List, Dict, Any
+
+
 def preprocess_data(
     data: Dict[str, str],
     input_template: Optional[str] = None,
@@ -221,7 +224,7 @@ class SFTDataset(Dataset):
         
         # 保存处理结果
         self.prompts = processed_dataset["prompt"]
-        self.response = processed_dataset["response"]
+        self.responses = processed_dataset["response"]
         self.prompt_ids_lens = processed_dataset["prompt_ids_len"]
         
     def process_data(self, data: Dict[str, str]) -> Dict[str, Optional[Union[str, int]]]:
