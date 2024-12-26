@@ -1,0 +1,4 @@
+models/*
+wandb/*
+checkpoint/*
+**/__pycache__
