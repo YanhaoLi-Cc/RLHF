@@ -143,12 +143,6 @@ class SFTDataset(Dataset):
         >>> # 访问数据
         >>> prompt, response = sft_dataset[0]
         >>> print(f"Prompt length: {len(prompt)}")
-
-    Note:
-        - 支持并行处理
-        - 自动数据过滤
-        - 灵活配置选项
-        - 内存效率优化
     """
 
     def __init__(
@@ -174,11 +168,6 @@ class SFTDataset(Dataset):
             pretrain_mode: 预训练模式标志
             num_processors: 并行处理器数量
             multiple_of: 序列长度倍数约束
-
-        Note:
-            - 初始化过程包含数据处理
-            - 自动配置参数读取
-            - 并行处理优化
         """
         super().__init__()
         
