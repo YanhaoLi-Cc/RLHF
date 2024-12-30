@@ -40,6 +40,13 @@ class GPTLMLoss(nn.Module):
         Note:
             使用RingAttention时,每个进程只处理部分序列长度的数据
             如果某个batch的标签全为IGNORE_INDEX,返回0 loss以维持梯度流动
+            
+        Examples:
+        >>> # 普通训练示例
+        >>> # 原始logits对应位置: [H, e, l, l, o, _, W, o, r, l, d]
+        >>> # shift_logits位置:   [H, e, l, l, o, _, W, o, r, l]  # 去掉最后的d
+        >>> # 原始labels位置:     [H, e, l, l, o, _, W, o, r, l, d]
+        >>> # shift_labels位置:      [e, l, l, o, _, W, o, r, l, d]  # 去掉开头的H
         """
         # RingAttention分布式训练
         if self.ring_attn_group is not None:
@@ -64,9 +71,10 @@ class GPTLMLoss(nn.Module):
             loss = loss / self.ring_attn_world_size
         # 不使用RingAttention的普通训练
         else:
-            shift_logits = logits[..., :-1, :].contiguous()
+            shift_logits = logits[..., :-1, :].contiguous() # NOTE: :-1 表示取除了最后一个位置外的所有位置 : 保持词表维度完整
             shift_labels = labels[..., 1:].contiguous()
 
+            # \mathcal{L} = -\frac{1}{T} \sum_{t=1}^{T} \log P(y_t | x_{1:t-1})
             loss = self.loss(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         return loss
