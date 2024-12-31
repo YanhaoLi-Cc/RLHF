@@ -116,18 +116,6 @@ class SFTDataset(Dataset):
         response: 处理后的响应文本
         prompt_ids_lens: 提示文本的token长度
 
-    Technical Details:
-        1. 数据处理流程:
-           - 加载原始数据集
-           - 并行处理数据
-           - 过滤无效数据
-           - 保存处理结果
-
-        2. 配置管理:
-           - 支持模板配置
-           - 动态参数获取
-           - 模式切换
-
     Example:
         >>> # 创建数据集实例
         >>> tokenizer = AutoTokenizer.from_pretrained("model_name")
@@ -461,7 +449,6 @@ class SFTDataset(Dataset):
         1. 序列打包合并
         2. 位置索引标记
         3. 长度对齐padding
-        4. 信息收集整理
 
         Args:
             item_list: 数据样本列表，每个样本包含:
